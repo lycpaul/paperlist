@@ -5,6 +5,26 @@ Image Computing and Computer Assisted Intervention) conference. Each year's data
 is provided as a `MICCAI<YEAR>_Paper_List_with_Abstract.csv` file containing the
 full records including abstracts.
 
+## Statistics
+
+| Year | Papers | Topic categories | With code | With dataset |
+| --- | --- | --- | --- | --- |
+| 2025 | 1,027 | 59 | 710 | 375 |
+| 2024 | 856 | 69 | 581 | 310 |
+| 2023 | 730 | 57 | 467 | 285 |
+| 2022 | 573 | 55 | 336 | 211 |
+| 2021 | 531 | 52 | 271 | 166 |
+
+"Topic categories" is the number of distinct labels in the `Topics` column;
+each paper carries several. Across every year the most common topics are
+**Image Segmentation**, **Computer-Aided Diagnosis**, and **MRI** imaging.
+Accepted-paper counts have grown steadily (531 → 1,027), as has the share of
+papers releasing code (≈51% → ≈69%).
+
+> Note: MICCAI 2025 reformatted its topic labels into a hierarchical
+> "Area -> Subtopic" form (earlier years use a flatter "Area - Subtopic"), so
+> the category counts are not strictly comparable across the 2024/2025 boundary.
+
 ## Sources & credits
 
 The data in this directory is built from the official MICCAI accepted-paper
@@ -18,3 +38,35 @@ the respective conference organizers.
 | MICCAI 2023 | https://conferences.miccai.org/2023/papers/ |
 | MICCAI 2022 | https://conferences.miccai.org/2022/papers/ |
 | MICCAI 2021 | https://miccai2021.org/openaccess/paperlinks/index.html |
+
+## CSV columns
+
+Every `MICCAI<YEAR>_Paper_List_with_Abstract.csv` has a header row and the same
+eight columns:
+
+| Column | Description |
+| --- | --- |
+| `Title` | Paper title. |
+| `Authors` | `;`-separated authors, `Last, First`. |
+| `Topics` | `; `-separated topic categories (may be empty if none were listed). |
+| `Abstract` | Full abstract. |
+| `Code` | `;`-separated code-repository URL(s); empty when not provided. |
+| `Dataset` | `;`-separated dataset URL(s); empty when not provided. |
+| `PDF` | Open-access PDF link (2024 – 2025), or the DOI / SpringerLink (2021 – 2023, which have no open-access PDF). |
+| `Paper Page` | The per-paper detail page the record was scraped from. |
+
+## Regenerating the data
+
+The CSVs are produced by [`../scripts/scrape_miccai.py`](../scripts/scrape_miccai.py)
+(Python standard library only — no dependencies). The hosting and HTML layout
+changed across editions, so the scraper picks a site profile per year
+automatically.
+
+```bash
+python scripts/scrape_miccai.py --year 2025      # any year 2021–2025
+python scripts/scrape_miccai.py --year 2025 --limit 10   # quick smoke test
+```
+
+Downloaded pages are cached under `MICCAI/.cache/<year>/`, so re-runs and
+interrupted runs are fast and resumable. Useful flags: `--workers`, `--delay`,
+`--out`, `--cache-dir`.
