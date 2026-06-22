@@ -14,11 +14,17 @@ each conference subdirectory's `README.md` for the per-year sources and credits.
 
 ## Coverage
 
-| Conference | Field | Years | Files |
-| --- | --- | --- | --- |
-| [ICRA](ICRA/README.md) | Robotics | 2023 – 2026 | `.md` + `.csv` |
-| [IROS](IROS/README.md) | Robotics | 2023 – 2025 | `.md` + `.csv` |
-| [MICCAI](MICCAI/README.md) | Medical imaging | 2021 – 2025 | `.csv` only |
+| Conference | Field | Years | Lists | Papers | Files |
+| --- | --- | --- | --- | --- | --- |
+| [ICRA](ICRA/README.md) | Robotics | 2023 – 2026 | 4 | 8,968 | `.md` + `.csv` |
+| [IROS](IROS/README.md) | Robotics | 2023 – 2025 | 3 | 5,966 | `.md` + `.csv` |
+| [MICCAI](MICCAI/README.md) | Medical imaging | 2021 – 2025 | 5 | 3,717 | `.csv` only |
+| **Total** | | | **12** | **18,651** | |
+
+Per-year paper counts and topic/session breakdowns live in each conference's
+own `README.md`. Counts are taken from the canonical `.md` lists for ICRA/IROS
+and from the generated CSVs for MICCAI (and for ICRA 2025, whose `.md` currently
+duplicates the IROS 2025 list).
 
 ## Repository layout
 
