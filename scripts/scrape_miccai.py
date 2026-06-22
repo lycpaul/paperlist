@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
-"""Scrape the MICCAI open-access paper list into an ICRA/IROS-style CSV.
+"""Scrape a MICCAI open-access paper list into an ICRA/IROS-style CSV.
 
-The MICCAI proceedings site (https://papers.miccai.org/miccai-<year>/) renders a
-single "List of Papers" page from which we get each paper's title, authors, and a
-link to a per-paper detail page. The detail page additionally carries the paper's
-topic categories and full abstract.
+Each MICCAI edition publishes an accepted-paper list plus a per-paper detail
+page carrying the abstract, topics, and (often) code/dataset links. The hosting
+and HTML layout changed over the years, so the scraper selects a *site profile*
+per year:
 
-This script:
-  1. downloads the list page and parses one record per paper,
-  2. downloads each paper's detail page (cached on disk, so reruns are cheap and
-     interrupted runs resume), and
-  3. writes ``MICCAI<year>_Paper_List_with_Abstract.csv`` under the MICCAI folder.
+  * ``posts`` (2024, 2025, papers.miccai.org/miccai-<year>/)
+      List page already carries the title, author chips and the open-access PDF
+      link; the detail page adds topics, abstract, code and dataset.
+  * ``conf`` (2022, 2023, conferences.miccai.org/<year>/papers/)
+      List page carries only titles + detail links; authors and the paper
+      (DOI/SharedIt) link come from the detail page.
+  * ``flat`` (2021, miccai2021.org/openaccess/paperlinks/)
+      A flat <a> list on a separate host with relative detail URLs; everything
+      else comes from the detail page.
+
+All editions share the same detail-page anchors (``abstract-id``, ``link-id``,
+``code-id``, ``dataset-id``), so detail parsing is unified across profiles.
 
 Output columns (mirrors the recent ICRA/IROS "with abstract" CSVs):
     Title, Authors, Topics, Abstract, Code, Dataset, PDF, Paper Page
 
-Only the Python standard library is used, so no ``pip install`` is required.
+For 2021-2023 there is no open-access PDF, so the "PDF" column holds the paper's
+DOI (or SharedIt) link instead. Only the Python standard library is used.
 
 Examples:
     python scripts/scrape_miccai.py                 # full 2025 scrape
+    python scripts/scrape_miccai.py --year 2023     # a different edition
     python scripts/scrape_miccai.py --limit 10      # quick smoke test
-    python scripts/scrape_miccai.py --year 2024     # a different edition
 """
 
 from __future__ import annotations
@@ -34,37 +42,60 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 USER_AGENT = (
-    "Mozilla/5.0 (compatible; paperlist-scraper/1.0; "
-    "+https://github.com/) Python-urllib"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 )
 
-# Per-paper record parsed from the list page.
-DETAIL_HREF_RE = re.compile(r'href="(/miccai-\d+/\d+-Paper\d+\.html)"')
-PDF_HREF_RE = re.compile(r'href="(https://papers\.miccai\.org/[^"]*?_paper\.pdf)"')
-TITLE_RE = re.compile(r"<b>(.*?)</b>", re.DOTALL)
-AUTHOR_RE = re.compile(r'tags#[^"]*">(.*?)</a>', re.DOTALL)
+# Per-year site configuration. Unknown years fall back to the modern ``posts``
+# layout under papers.miccai.org.
+SITES = {
+    "2025": {"list_url": "https://papers.miccai.org/miccai-2025/", "profile": "posts"},
+    "2024": {"list_url": "https://papers.miccai.org/miccai-2024/", "profile": "posts"},
+    "2023": {"list_url": "https://conferences.miccai.org/2023/papers/", "profile": "conf"},
+    "2022": {"list_url": "https://conferences.miccai.org/2022/papers/", "profile": "conf"},
+    "2021": {
+        "list_url": "https://miccai2021.org/openaccess/paperlinks/index.html",
+        "profile": "flat",
+    },
+}
+
 PAPER_ID_RE = re.compile(r"Paper(\d+)\.html")
 
-# Detail-page fields.
+# --- list-page patterns -----------------------------------------------------
+# "posts" profile: one item per ``posts-list-item-name`` span.
+POSTS_DETAIL_RE = re.compile(r'href="(/miccai-\d+/\d+-Paper\d+\.html)"')
+POSTS_TITLE_RE = re.compile(r"<b>(.*?)</b>", re.DOTALL)
+POSTS_PDF_RE = re.compile(r'href="(https://[^"]*?_paper\.pdf)"')
+POSTS_AUTHOR_RE = re.compile(r'tags#[^"]*">(.*?)</a>', re.DOTALL)
+# "conf"/"flat" profiles: plain anchors to ``...NNN-PaperID.html`` detail pages.
+ANCHOR_RE = re.compile(
+    r'<a\s+href="([^"]*?\d+-Paper\d+\.html)"[^>]*>(.*?)</a>', re.DOTALL | re.IGNORECASE
+)
+
+# --- detail-page patterns (shared across years) -----------------------------
+TOPIC_REGION_RE = re.compile(r"Paper Topic\(s\):.*?</h2>(.*?)<h1", re.DOTALL | re.IGNORECASE)
+CATEGORY_RE = re.compile(r'href="[^"]*categories#[^"]*"[^>]*>(.*?)</a>', re.DOTALL)
+# Author chips on the detail page (used when the list page lacked authors).
+# Match the chip anchors by their ``tags#`` href -- the enclosing
+# ``<div class="post-tags">`` also carries that class but wraps the heading.
+DETAIL_AUTHOR_RE = re.compile(r'href="[^"]*tags#[^"]*"[^>]*>(.*?)</a>', re.DOTALL)
 ABSTRACT_RE = re.compile(
     r'id="abstract-id"[^>]*>(.*?)<h1\s+id="link-id"', re.DOTALL | re.IGNORECASE
 )
-# Topic categories link to ``categories#...``; author chips reuse the same
-# ``post-category`` class but link to ``tags#...``, so match the href explicitly.
-TOPIC_RE = re.compile(
-    r'href="/miccai-\d+/categories#[^"]*"\s+class="post-category"[^>]*>(.*?)</a>',
-    re.DOTALL,
+# "Link to paper" section: open-access PDF (2024/25) or DOI/SharedIt (2021-23).
+LINK_SECTION_RE = re.compile(
+    r'id="link-id"[^>]*>(.*?)<h1\s+id="code-id"', re.DOTALL | re.IGNORECASE
 )
-# Code repository and dataset links live in their own ``<h1 id=...>`` sections;
-# absent links render as plain "N/A" text (no href), so href extraction yields "".
 CODE_SECTION_RE = re.compile(
     r'id="code-id"[^>]*>(.*?)<h1\s+id="dataset-id"', re.DOTALL | re.IGNORECASE
 )
+# Dataset section ends at the next heading (bibtex in 2024/25) or rule (2021-23).
 DATASET_SECTION_RE = re.compile(
-    r'id="dataset-id"[^>]*>(.*?)<h1\s+id="bibtex-id"', re.DOTALL | re.IGNORECASE
+    r'id="dataset-id"[^>]*>(.*?)(?:<h1|<hr)', re.DOTALL | re.IGNORECASE
 )
 HREF_RE = re.compile(r'href="([^"]+)"')
 TAG_RE = re.compile(r"<[^>]+>")
@@ -96,71 +127,109 @@ def fetch(url: str, retries: int = 3, timeout: int = 30) -> str:
     raise RuntimeError(f"failed to fetch {url}: {last_err}")
 
 
-def parse_list_page(html_text: str, base: str) -> list[dict]:
-    """Return one record dict per paper found on the list page.
+def unique(items) -> list[str]:
+    """Order-preserving de-duplication of non-empty strings."""
+    seen: dict[str, None] = {}
+    for item in items:
+        item = item.strip()
+        if item:
+            seen.setdefault(item, None)
+    return list(seen)
 
-    Each record has: paper_id, title, authors (list), detail_url, pdf_url.
-    The list is chunked on the per-item span class so titles/authors/links from
-    different papers never bleed together.
-    """
-    chunks = html_text.split("posts-list-item-name")
+
+def new_record(title: str, detail_url: str, authors=None, pdf_url="") -> dict:
+    pid = PAPER_ID_RE.search(detail_url)
+    return {
+        "paper_id": pid.group(1) if pid else "",
+        "title": title,
+        "detail_url": detail_url,
+        "authors": authors or [],
+        "pdf_url": pdf_url,
+    }
+
+
+def discover_papers(html_text: str, cfg: dict) -> list[dict]:
+    """Parse the list page into per-paper records according to the profile."""
+    list_url = cfg["list_url"]
     papers: list[dict] = []
-    for chunk in chunks[1:]:  # chunk[0] is the page head, before the first paper
-        detail = DETAIL_HREF_RE.search(chunk)
-        title = TITLE_RE.search(chunk)
-        if not detail or not title:
+
+    if cfg["profile"] == "posts":
+        # One paper per item span; title/authors/PDF are all on the list page.
+        for chunk in html_text.split("posts-list-item-name")[1:]:
+            detail = POSTS_DETAIL_RE.search(chunk)
+            title = POSTS_TITLE_RE.search(chunk)
+            if not detail or not title:
+                continue
+            pdf = POSTS_PDF_RE.search(chunk)
+            papers.append(
+                new_record(
+                    title=clean_text(title.group(1)),
+                    detail_url=urljoin(list_url, detail.group(1)),
+                    authors=[clean_text(a) for a in POSTS_AUTHOR_RE.findall(chunk)],
+                    pdf_url=pdf.group(1) if pdf else "",
+                )
+            )
+        return papers
+
+    # "conf" and "flat": plain anchors; authors/PDF come from the detail page.
+    seen_urls: set[str] = set()
+    for href, text in ANCHOR_RE.findall(html_text):
+        detail_url = urljoin(list_url, href)
+        if detail_url in seen_urls:
             continue
-        detail_path = detail.group(1)
-        pid_match = PAPER_ID_RE.search(detail_path)
-        pdf = PDF_HREF_RE.search(chunk)
-        papers.append(
-            {
-                "paper_id": pid_match.group(1) if pid_match else "",
-                "title": clean_text(title.group(1)),
-                "authors": [clean_text(a) for a in AUTHOR_RE.findall(chunk)],
-                "detail_url": base.rstrip("/").rsplit("/", 1)[0] + detail_path,
-                "pdf_url": pdf.group(1) if pdf else "",
-            }
-        )
+        seen_urls.add(detail_url)
+        papers.append(new_record(title=clean_text(text), detail_url=detail_url))
     return papers
 
 
-def section_links(section_re: re.Pattern, html_text: str) -> str:
-    """Return ``;``-joined, order-preserving unique hrefs from a detail section."""
+def section_links(section_re: re.Pattern, html_text: str) -> list[str]:
+    """Return order-preserving unique hrefs from a detail-page section."""
     m = section_re.search(html_text)
-    if not m:
-        return ""
-    seen: dict[str, None] = {}
-    for href in HREF_RE.findall(m.group(1)):
-        seen.setdefault(href.strip(), None)
-    return ";".join(seen)
+    return unique(HREF_RE.findall(m.group(1))) if m else []
 
 
-def parse_detail_page(html_text: str) -> tuple[str, str, str, str]:
-    """Return (topics, abstract, code, dataset) from a paper detail page."""
-    # The detail page renders the topic block more than once; dedupe in order.
-    seen: dict[str, None] = {}
-    for t in TOPIC_RE.findall(html_text):
-        seen.setdefault(clean_text(t), None)
-    topics = "; ".join(seen)
+def paper_link(html_text: str) -> str:
+    """Best paper link: open-access PDF if present, else DOI, else first link."""
+    links = section_links(LINK_SECTION_RE, html_text)
+    for href in links:
+        if href.lower().endswith(".pdf"):
+            return href
+    for href in links:
+        if "doi.org" in href.lower():
+            return href
+    return links[0] if links else ""
+
+
+def parse_detail_page(html_text: str) -> dict:
+    """Extract topics, abstract, code, dataset, detail-page authors and link."""
+    topic_region = TOPIC_REGION_RE.search(html_text)
+    topics = (
+        unique(clean_text(t) for t in CATEGORY_RE.findall(topic_region.group(1)))
+        if topic_region
+        else []
+    )
 
     abstract = ""
     m = ABSTRACT_RE.search(html_text)
     if m:
-        abstract = clean_text(m.group(1))
-        # The section starts with the literal heading word "Abstract".
-        abstract = re.sub(r"^Abstract\s*", "", abstract)
-    if not abstract:
-        # Fallback: the <meta name="description"> mirrors the abstract.
+        abstract = re.sub(r"^Abstract\s*", "", clean_text(m.group(1)))
+    if not abstract:  # fallback: <meta name="description"> mirrors the abstract
         meta = re.search(
             r'<meta\s+name="description"\s+content="(.*?)"', html_text, re.DOTALL
         )
         if meta:
             abstract = re.sub(r"^Abstract\s*", "", clean_text(meta.group(1)))
 
-    code = section_links(CODE_SECTION_RE, html_text)
-    dataset = section_links(DATASET_SECTION_RE, html_text)
-    return topics, abstract, code, dataset
+    return {
+        "topics": "; ".join(topics),
+        "abstract": abstract,
+        "code": ";".join(section_links(CODE_SECTION_RE, html_text)),
+        "dataset": ";".join(section_links(DATASET_SECTION_RE, html_text)),
+        "detail_authors": unique(
+            clean_text(a) for a in DETAIL_AUTHOR_RE.findall(html_text)
+        ),
+        "paper_link": paper_link(html_text),
+    }
 
 
 def detail_cache_path(cache_dir: str, paper_id: str, detail_url: str) -> str:
@@ -184,12 +253,16 @@ def get_detail_html(paper: dict, cache_dir: str, delay: float) -> str:
 
 def enrich(paper: dict, cache_dir: str, delay: float) -> dict:
     try:
-        html_text = get_detail_html(paper, cache_dir, delay)
-        topics, abstract, code, dataset = parse_detail_page(html_text)
-        paper["topics"] = topics
-        paper["abstract"] = abstract
-        paper["code"] = code
-        paper["dataset"] = dataset
+        detail = parse_detail_page(get_detail_html(paper, cache_dir, delay))
+        paper["topics"] = detail["topics"]
+        paper["abstract"] = detail["abstract"]
+        paper["code"] = detail["code"]
+        paper["dataset"] = detail["dataset"]
+        # Fill author/PDF gaps for the layouts that omit them from the list page.
+        if not paper["authors"]:
+            paper["authors"] = detail["detail_authors"]
+        if not paper["pdf_url"]:
+            paper["pdf_url"] = detail["paper_link"]
     except Exception as err:  # keep going; report the gap in the CSV
         log(f"  ! {paper['paper_id'] or paper['detail_url']}: {err}")
         for key in ("topics", "abstract", "code", "dataset"):
@@ -208,7 +281,10 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0, help="only process the first N papers (0 = all)")
     args = ap.parse_args()
 
-    base = f"https://papers.miccai.org/miccai-{args.year}/"
+    cfg = SITES.get(
+        args.year,
+        {"list_url": f"https://papers.miccai.org/miccai-{args.year}/", "profile": "posts"},
+    )
     out_path = args.out or os.path.join(
         repo_root, "MICCAI", f"MICCAI{args.year}_Paper_List_with_Abstract.csv"
     )
@@ -216,8 +292,8 @@ def main() -> int:
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     os.makedirs(cache_dir, exist_ok=True)
 
-    log(f"Fetching paper list: {base}")
-    papers = parse_list_page(fetch(base), base)
+    log(f"Fetching paper list ({cfg['profile']} layout): {cfg['list_url']}")
+    papers = discover_papers(fetch(cfg["list_url"]), cfg)
     log(f"Parsed {len(papers)} papers from the list page.")
     if not papers:
         log("No papers parsed - the page structure may have changed.")
