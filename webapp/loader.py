@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Conference directories live next to this package's parent.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFERENCES = ("ICRA", "IROS", "MICCAI")
+CONFERENCES = ("ICRA", "IROS", "MICCAI", "MIDL")
 
 # Some abstracts are very large; allow big CSV fields.
 csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
@@ -66,6 +66,14 @@ _MICCAI_PROFILE = {
                 "pdf", "paper_page"],
 }
 
+# All MIDL editions share one schema. The TL;DR column has no normalized field,
+# and community-implementation links are surfaced via the "code" link slot.
+_MIDL_PROFILE = {
+    "header": True,
+    "columns": ["title", "authors", "session", "keywords", "_", "abstract",
+                "code", "pdf", "paper_page"],
+}
+
 _FILENAME_RE = re.compile(r"^([A-Za-z]+)(\d{4})_Paper_List_with_Abstract\.csv$")
 _PREFIX_RE = re.compile(r"^\s*(?:keywords|abstract)\s*:\s*", re.IGNORECASE)
 
@@ -102,6 +110,8 @@ def parse_filename(filename):
 def _profile_for(conference, year):
     if conference == "MICCAI":
         return _MICCAI_PROFILE
+    if conference == "MIDL":
+        return _MIDL_PROFILE
     return _PROFILES.get((conference, year))
 
 
