@@ -1,7 +1,7 @@
 # Paper List Search Web App
 
 A small local web app to search and filter the repository's accepted-paper
-lists (ICRA, IROS, MICCAI). A Flask backend digests the `_with_Abstract.csv`
+lists (ICRA, IROS, MICCAI, MIDL). A Flask backend digests the `_with_Abstract.csv`
 files into one unified in-memory index and serves a single-page frontend.
 
 ## Features
@@ -9,7 +9,8 @@ files into one unified in-memory index and serves a single-page frontend.
 - **Keyword search** across title, abstract, and keywords (case-insensitive).
 - **Filter by conference and year** (multi-select).
 - **Filter by keyword / session / topic.**
-- **Links** to PDF / code / dataset / paper page where available (mainly MICCAI).
+- **Links** to PDF / code / dataset / paper page where available (mainly MICCAI
+  and MIDL).
 - **Paginated** results (50 per page) with a total count.
 - Click any row to expand its **abstract**.
 
@@ -23,7 +24,7 @@ python app.py                          # serves http://127.0.0.1:5000/
 Options: `--host`, `--port`, `--debug`.
 
 The CSV files are read from the conference directories (`../ICRA`, `../IROS`,
-`../MICCAI`) at startup; ~20k papers load in a second or two.
+`../MICCAI`, `../MIDL`) at startup; ~20k papers load in a second or two.
 
 ## API
 
@@ -44,10 +45,11 @@ webapp/
 └── tests/          # pytest unit tests for loader and search
 ```
 
-The per-file schema mapping lives in `loader.py` (`_PROFILES`); it mirrors the
-"CSV file structure" table in the repository root `README.md`. Schema quirks
-(headerless files, `Keywords:` / `Abstract:` prefixes, the MICCAI link columns,
-and non-UTF-8 bytes in one file) are all handled there.
+The per-file schema mapping lives in `loader.py` (`_PROFILES`, plus shared
+MICCAI/MIDL profiles); it mirrors the "CSV file structure" table in the
+repository root `README.md`. Schema quirks (headerless files, `Keywords:` /
+`Abstract:` prefixes, the MICCAI/MIDL link columns, and non-UTF-8 bytes in one
+file) are all handled there.
 
 ## Tests
 
