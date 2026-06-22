@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Paper List Search</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Paper List Search</h1>
+      <p class="subtitle">ICRA &middot; IROS &middot; MICCAI accepted papers</p>
+    </div>
+    <button type="button" id="theme-toggle" class="theme-toggle"
+            aria-label="Toggle light/dark theme"></button>
+  </header>
+
+  <form id="search-form" class="controls" autocomplete="off">
+    <div class="field field-grow">
+      <label for="q">Search title &amp; abstract</label>
+      <input type="text" id="q" name="q" placeholder="e.g. lidar odometry, segmentation">
+    </div>
+    <div class="field">
+      <label for="conference">Conference</label>
+      <select id="conference" name="conference" multiple size="3"></select>
+    </div>
+    <div class="field">
+      <label for="year">Year</label>
+      <select id="year" name="year" multiple size="3"></select>
+    </div>
+    <div class="field field-grow">
+      <label for="keyword">Keyword / session / topic</label>
+      <input type="text" id="keyword" name="keyword" placeholder="e.g. SLAM, Manipulation">
+    </div>
+    <div class="field field-actions">
+      <button type="submit">Search</button>
+      <button type="button" id="reset">Reset</button>
+    </div>
+  </form>
+
+  <div id="status" class="status"></div>
+
+  <table id="results">
+    <thead>
+      <tr>
+        <th class="col-title">Title</th>
+        <th class="col-authors">Authors</th>
+        <th class="col-venue">Venue</th>
+        <th class="col-topic">Session / Keywords</th>
+        <th class="col-links">Links</th>
+      </tr>
+    </thead>
+    <tbody id="results-body"></tbody>
+  </table>
+
+  <div id="pager" class="pager" hidden>
+    <button type="button" id="prev">&larr; Prev</button>
+    <span id="page-info"></span>
+    <button type="button" id="next">Next &rarr;</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -26,6 +26,21 @@ own `README.md`. Counts are taken from the canonical `.md` lists for ICRA/IROS
 and from the generated CSVs for MICCAI (and for ICRA 2025, whose `.md` currently
 duplicates the IROS 2025 list).
 
+## Search web app
+
+[`webapp/`](webapp/README.md) is a small local web app for searching and
+filtering these lists. A Flask backend digests every `_with_Abstract.csv` file
+into one unified in-memory index (normalizing the differing per-file schemas)
+and serves a single-page frontend that supports keyword search over
+titles/abstracts, filtering by conference, year, and keyword/session/topic,
+PDF/code/dataset links, and paginated results with expandable abstracts.
+
+```bash
+cd webapp && pip install -r requirements.txt && python app.py   # http://127.0.0.1:5000/
+```
+
+See [`webapp/README.md`](webapp/README.md) for details.
+
 ## Repository layout
 
 ```
@@ -55,8 +70,13 @@ paperlist/
 │   ├── MICCAI2023_Paper_List_with_Abstract.csv
 │   ├── MICCAI2024_Paper_List_with_Abstract.csv
 │   └── MICCAI2025_Paper_List_with_Abstract.csv
-└── scripts/
-    └── scrape_miccai.py   # regenerates the MICCAI CSVs (see MICCAI/README.md)
+├── scripts/
+│   └── scrape_miccai.py   # regenerates the MICCAI CSVs (see MICCAI/README.md)
+└── webapp/                # local search web app (see webapp/README.md)
+    ├── app.py             # Flask backend: loads the CSVs, serves the API
+    ├── loader.py          # normalizes the per-file CSV schemas
+    ├── search.py          # keyword search, filtering, pagination
+    └── static/            # single-page frontend (HTML/JS/CSS)
 ```
 
 Naming convention:
